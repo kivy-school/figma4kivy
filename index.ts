@@ -17,6 +17,9 @@ let wsActive    = false;
 let ws: WebSocket | null = null;
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Signal to code.ts that the UI is ready to receive restored state.
+parent.postMessage({ pluginMessage: { type: "uiReady" } }, "*");
+
 function wsUrl(): string {
   return serverUrl.value.trim().replace(/^http/, "ws") + "/ws";
 }
@@ -142,7 +145,25 @@ wsBtn.addEventListener("click", () => {
 });
 
 bgBtn.addEventListener("click", () => {
-  parent.postMessage({ pluginMessage: { type: "hideUI" } }, "*");
+  if (kvEnabled) {
+    kvEnabled = false;
+    kvBtn.classList.remove("active");
+    output.style.display = "none";
+    copyBtn.style.display = "none";
+    output.textContent = "";
+  }
+  // Persist state so it survives the plugin restart on return from background.
+  parent.postMessage({
+    pluginMessage: {
+      type: "hideUI",
+      state: {
+        kvEnabled: false,
+        liveMode,
+        connected,
+        serverUrl: serverUrl.value.trim(),
+      },
+    },
+  }, "*");
 });
 
 window.onmessage = (event: MessageEvent) => {
@@ -152,6 +173,34 @@ window.onmessage = (event: MessageEvent) => {
   if (msg.type === "error") {
     output.textContent = "";
     status.textContent = "⚠ " + msg.message;
+    return;
+  }
+
+  if (msg.type === "restoreState") {
+    const s = msg.state;
+    if (s.serverUrl) serverUrl.value = s.serverUrl;
+
+    kvEnabled = s.kvEnabled ?? true;
+    kvBtn.classList.toggle("active", kvEnabled);
+    output.style.display = kvEnabled ? "" : "none";
+    if (!kvEnabled) {
+      copyBtn.style.display = "none";
+      output.textContent = "";
+      parent.postMessage({ pluginMessage: { type: "resize", width: window.innerWidth, height: 160 } }, "*");
+    }
+
+    liveMode = s.liveMode ?? false;
+    liveBtn.classList.toggle("active", liveMode);
+    liveBtn.textContent = liveMode ? "⦿ Live (on)" : "⦿ Live";
+    if (liveMode) {
+      parent.postMessage({ pluginMessage: { type: "setLive", enabled: true } }, "*");
+    }
+
+    connected = s.connected ?? false;
+    connectBtn.classList.toggle("active", connected);
+    connectBtn.textContent = connected ? "Connected" : "Connect";
+
+    status.textContent = "Resumed.";
     return;
   }
 

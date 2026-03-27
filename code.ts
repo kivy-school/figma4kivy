@@ -97,6 +97,16 @@ let changeHandler: ((e: DocumentChangeEvent) => void) | null = null;
 const tempNodeMap = new Map<string, string>();
 
 figma.ui.onmessage = (msg) => {
+  if (msg.type === "uiReady") {
+    figma.clientStorage.getAsync("uiState").then((saved: any) => {
+      if (saved) {
+        figma.ui.postMessage({ type: "restoreState", state: saved });
+        figma.clientStorage.deleteAsync("uiState");
+      }
+    });
+    return;
+  }
+
   if (msg.type === "convert") {
     sendSelection();
     return;
@@ -148,7 +158,11 @@ figma.ui.onmessage = (msg) => {
   }
 
   if (msg.type === "hideUI") {
-    figma.ui.hide();
+    if (msg.state) {
+      figma.clientStorage.setAsync("uiState", msg.state).then(() => figma.ui.hide());
+    } else {
+      figma.ui.hide();
+    }
   }
 
   if (msg.type === "figmaCmd") {
