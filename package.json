@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "vite build && npm run inline && npm run build:code",
+    "build:code": "tsc --project tsconfig.code.json",
+    "inline": "node scripts/inline.mjs",
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "*",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}
