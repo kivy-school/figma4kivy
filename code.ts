@@ -39,6 +39,8 @@ const NODE_FIELDS = [
   // TypePropertiesTrait (TEXT)
   "characters", "style", "characterStyleOverrides", "styleOverrideTable",
   "lineTypes", "lineIndentations",
+  // TEXT font properties (direct TextNode properties)
+  "fontSize", "fontName", "fontWeight", "textAlignHorizontal", "textAlignVertical",
   // InstanceNode
   "componentId", "isExposedInstance", "exposedInstances",
   "componentProperties", "overrides", "componentPropertyDefinitions",
@@ -56,6 +58,20 @@ function serialise(node: SceneNode): object {
     if (n[key] !== undefined) base[key] = n[key];
   }
 
+  // corner radius: if figma.mixed (a Symbol, dropped by JSON.stringify),
+  // still ensure rectangleCornerRadii is a plain number array so Swift can
+  // decode [Double] correctly. Symbol elements in arrays become null in JSON,
+  // which would cause the entire [Double] decode to fail.
+  if (n.rectangleCornerRadii !== undefined) {
+    const r = n.rectangleCornerRadii as any;
+    base["rectangleCornerRadii"] = [
+      typeof r[0] === "number" ? r[0] : 0,
+      typeof r[1] === "number" ? r[1] : 0,
+      typeof r[2] === "number" ? r[2] : 0,
+      typeof r[3] === "number" ? r[3] : 0,
+    ];
+  }
+
   if (n.layoutGrids?.length) {
     base.layoutGrids = n.layoutGrids.map((g: any) => ({
       pattern:     g.pattern,
@@ -71,12 +87,29 @@ function serialise(node: SceneNode): object {
   return base;
 }
 
-function sendSelection() {
-  const selection = figma.currentPage.selection;
-  const nodes =
-    selection.length > 0
-      ? selection
+function sendSelection(msgType = "figmaNodes") {
+  let nodes: SceneNode[];
+
+  if (lockedNodeIds !== null) {
+    if (lockedNodeIds.length === 0) {
+      // Locked to the whole page
+      nodes = figma.currentPage.children as SceneNode[];
+    } else {
+      // Locked to specific nodes
+      nodes = lockedNodeIds
+        .map((id) => figma.getNodeById(id))
+        .filter((n): n is SceneNode => n !== null && n.type !== "DOCUMENT" && n.type !== "PAGE");
+      if (nodes.length === 0) {
+        figma.ui.postMessage({ type: "error", message: "Locked nodes no longer exist." });
+        return;
+      }
+    }
+  } else {
+    const selection = figma.currentPage.selection;
+    nodes = selection.length > 0
+      ? (selection as SceneNode[])
       : (figma.currentPage.children as SceneNode[]);
+  }
 
   if (nodes.length === 0) {
     figma.ui.postMessage({ type: "error", message: "Nothing selected." });
@@ -85,13 +118,17 @@ function sendSelection() {
 
   const serialised = nodes.map(serialise);
   figma.ui.postMessage({
-    type: "figmaNodes",
+    type: msgType,
     data: JSON.stringify(serialised),
   });
 }
 
 let liveHandler: (() => void) | null = null;
 let changeHandler: ((e: DocumentChangeEvent) => void) | null = null;
+// null  = not locked
+// []    = locked to whole page (nothing was selected when lock was toggled)
+// [...] = locked to specific node IDs
+let lockedNodeIds: string[] | null = null;
 
 // Maps server-assigned tempIds → real Figma node ids for command-driven nodes.
 const tempNodeMap = new Map<string, string>();
@@ -101,9 +138,15 @@ figma.ui.onmessage = (msg) => {
     figma.clientStorage.getAsync("uiState").then((saved: any) => {
       if (saved) {
         figma.ui.postMessage({ type: "restoreState", state: saved });
-        figma.clientStorage.deleteAsync("uiState");
       }
     });
+    return;
+  }
+
+  if (msg.type === "saveState") {
+    if (msg.state) {
+      figma.clientStorage.setAsync("uiState", msg.state);
+    }
     return;
   }
 
@@ -112,9 +155,26 @@ figma.ui.onmessage = (msg) => {
     return;
   }
 
+  if (msg.type === "getCanvasPyNodes") {
+    sendSelection("canvasPyNodes");
+    return;
+  }
+
   if (msg.type === "resize") {
     winW = msg.width; winH = msg.height;
     figma.ui.resize(winW, winH);
+    return;
+  }
+
+  if (msg.type === "setLock") {
+    if (msg.enabled) {
+      const sel = figma.currentPage.selection;
+      // Empty selection → lock to the whole page
+      lockedNodeIds = sel.length > 0 ? sel.map((n) => n.id) : [];
+      sendSelection();
+    } else {
+      lockedNodeIds = null;
+    }
     return;
   }
 
@@ -126,15 +186,19 @@ figma.ui.onmessage = (msg) => {
       }
       if (!changeHandler) {
         changeHandler = (e: DocumentChangeEvent) => {
-          // Only re-send if a changed node is part of (or ancestor of) the selection
-          const selectionIds = new Set(figma.currentPage.selection.map((n) => n.id));
-          if (selectionIds.size === 0) return;
-          const affected = e.documentChanges.some((c) => {
+          // locked to specific nodes → watch those; locked to page or nothing selected → watch all
+          const watchIds = lockedNodeIds !== null && lockedNodeIds.length > 0
+            ? new Set(lockedNodeIds)
+            : lockedNodeIds !== null
+              ? null  // page-lock: any change triggers resend
+              : new Set(figma.currentPage.selection.map((n) => n.id));
+          // watchIds null means page-locked — always resend on any document change
+          if (watchIds !== null && watchIds.size === 0) return;
+          const affected = watchIds === null || e.documentChanges.some((c) => {
             if (!("id" in c)) return false;
-            // walk up from changed node to see if selection contains it or a parent
             let node: BaseNode | null = figma.getNodeById((c as any).id);
             while (node) {
-              if (selectionIds.has(node.id)) return true;
+              if (watchIds!.has(node.id)) return true;
               node = node.parent;
             }
             return false;

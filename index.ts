@@ -1,71 +1,17 @@
 
-const convertBtn    = document.getElementById("convertBtn")    as HTMLButtonElement;
-const liveBtn       = document.getElementById("liveBtn")        as HTMLButtonElement;
-const kvBtn         = document.getElementById("kvBtn")          as HTMLButtonElement;
-const copyBtn       = document.getElementById("copyBtn")        as HTMLButtonElement;
-const connectBtn    = document.getElementById("connectBtn")     as HTMLButtonElement;
-const wsBtn         = document.getElementById("wsBtn")          as HTMLButtonElement;
-const bgBtn         = document.getElementById("bgBtn")          as HTMLButtonElement;
-const serverUrl     = document.getElementById("serverUrl")      as HTMLInputElement;
-const output        = document.getElementById("output")         as HTMLDivElement;
-const status        = document.getElementById("status")         as HTMLDivElement;
+const serverUrlEl  = document.getElementById("serverUrl")    as HTMLInputElement;
+const connectBtn   = document.getElementById("connectBtn")    as HTMLButtonElement;
+const backgroundBtn = document.getElementById("backgroundBtn") as HTMLButtonElement;
+const mainFrame    = document.getElementById("mainFrame")     as HTMLIFrameElement;
+const tabBtns     = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"));
 
-let connected   = false;
-let liveMode    = false;
-let kvEnabled   = true;
-let wsActive    = false;
-let ws: WebSocket | null = null;
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let connected = false;
+let activeRoute = "/lab";
 
-// Signal to code.ts that the UI is ready to receive restored state.
 parent.postMessage({ pluginMessage: { type: "uiReady" } }, "*");
 
-function wsUrl(): string {
-  return serverUrl.value.trim().replace(/^http/, "ws") + "/ws";
-}
-
-function connectWs() {
-  if (ws && ws.readyState <= WebSocket.OPEN) return;
-  status.textContent = "WS connecting…";
-  ws = new WebSocket(wsUrl());
-
-  ws.onopen = () => {
-    wsBtn.classList.add("active");
-    wsBtn.textContent = "⇄ WS (on)";
-    status.textContent = "WS connected.";
-    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-  };
-
-  ws.onmessage = (e) => {
-    try {
-      const cmd = JSON.parse(e.data as string);
-      parent.postMessage({ pluginMessage: { type: "figmaCmd", cmd } }, "*");
-    } catch { /* ignore malformed */ }
-  };
-
-  ws.onclose = () => {
-    wsBtn.classList.remove("active");
-    wsBtn.textContent = "⇄ WS";
-    if (!wsActive) return;
-    status.textContent = "WS closed — retrying in 2s…";
-    wsReconnectTimer = setTimeout(connectWs, 2000);
-  };
-
-  ws.onerror = () => {
-    status.textContent = "⚠ WS error — server running?";
-    ws?.close();
-  };
-}
-
-function disconnectWs() {
-  wsActive = false;
-  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-  ws?.close();
-  ws = null;
-}
-
-// ── Resize handles ───────────────────────────────────────────────────────────
-const MIN_W = 280, MIN_H = 320;
+// ── Resize handles ────────────────────────────────────────────────────────────
+const MIN_W = 280, MIN_H = 300;
 
 function attachResize(el: HTMLElement, resizeW: boolean) {
   let resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
@@ -88,152 +34,80 @@ function attachResize(el: HTMLElement, resizeW: boolean) {
 attachResize(document.getElementById("resizeHandleRight") as HTMLElement, true);
 attachResize(document.getElementById("resizeHandleLeft")  as HTMLElement, false);
 
-status.textContent = "Ready.";
-
-convertBtn.addEventListener("click", () => {
-  status.textContent = "Converting…";
-  copyBtn.style.display = "none";
-  parent.postMessage({ pluginMessage: { type: "convert" } }, "*");
-});
-
-liveBtn.addEventListener("click", () => {
-  liveMode = !liveMode;
-  liveBtn.classList.toggle("active", liveMode);
-  liveBtn.textContent = liveMode ? "⦿ Live (on)" : "⦿ Live";
-  status.textContent = liveMode ? "Live mode on — watching selection…" : "Live mode off.";
-  parent.postMessage({ pluginMessage: { type: "setLive", enabled: liveMode } }, "*");
-});
-
-kvBtn.addEventListener("click", () => {
-  kvEnabled = !kvEnabled;
-  kvBtn.classList.toggle("active", kvEnabled);
-  if (!kvEnabled) {
-    output.style.display = "none";
-    copyBtn.style.display = "none";
-    output.textContent = "";
-    parent.postMessage({ pluginMessage: { type: "resize", width: window.innerWidth, height: 160 } }, "*");
-  } else {
-    output.style.display = "";
-    parent.postMessage({ pluginMessage: { type: "resize", width: window.innerWidth, height: 540 } }, "*");
-  }
-});
-
-
-copyBtn.addEventListener("click", () => {
-  navigator.clipboard.writeText(output.textContent ?? "");
-  copyBtn.textContent = "Copied!";
-  setTimeout(() => (copyBtn.textContent = "Copy KV"), 1500);
-});
-
-connectBtn.addEventListener("click", () => {
-  connected = !connected;
-  connectBtn.classList.toggle("active", connected);
-  connectBtn.textContent = connected ? "Connected" : "Connect";
-  status.textContent = connected
-    ? "Connected — will send in live mode."
-    : "Disconnected.";
-});
-
-wsBtn.addEventListener("click", () => {
-  wsActive = !wsActive;
-  if (wsActive) {
-    connectWs();
-  } else {
-    disconnectWs();
-    wsBtn.textContent = "⇄ WS";
-  }
-});
-
-bgBtn.addEventListener("click", () => {
-  if (kvEnabled) {
-    kvEnabled = false;
-    kvBtn.classList.remove("active");
-    output.style.display = "none";
-    copyBtn.style.display = "none";
-    output.textContent = "";
-  }
-  // Persist state so it survives the plugin restart on return from background.
+// ── State persistence ─────────────────────────────────────────────────────────
+function saveState() {
   parent.postMessage({
     pluginMessage: {
-      type: "hideUI",
-      state: {
-        kvEnabled: false,
-        liveMode,
-        connected,
-        serverUrl: serverUrl.value.trim(),
-      },
+      type: "saveState",
+      state: { serverUrl: serverUrlEl.value.trim(), activeRoute, connected },
     },
   }, "*");
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(route: string) {
+  activeRoute = route;
+  tabBtns.forEach((btn) => btn.classList.toggle("tab-active", btn.dataset.route === route));
+  if (connected) mainFrame.src = serverUrlEl.value.trim() + route;
+  saveState();
+}
+
+tabBtns.forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.route!));
 });
 
-window.onmessage = (event: MessageEvent) => {
-  const msg = event.data?.pluginMessage;
-  if (!msg) return;
+// ── Connect ───────────────────────────────────────────────────────────────────
+function setConnected(value: boolean) {
+  connected = value;
+  connectBtn.classList.toggle("active", connected);
+  connectBtn.textContent = connected ? "Connected" : "Connect";
+  if (connected) {
+    mainFrame.src = serverUrlEl.value.trim() + activeRoute;
+    parent.postMessage({ pluginMessage: { type: "setLive", enabled: true } }, "*");
+  } else {
+    mainFrame.src = "";
+    parent.postMessage({ pluginMessage: { type: "setLive", enabled: false } }, "*");
+  }
+  saveState();
+}
 
-  if (msg.type === "error") {
-    output.textContent = "";
-    status.textContent = "⚠ " + msg.message;
+connectBtn.addEventListener("click", () => setConnected(!connected));
+
+backgroundBtn.addEventListener("click", () => {
+  parent.postMessage({ pluginMessage: { type: "hideUI" } }, "*");
+});
+
+// ── Plugin messages ───────────────────────────────────────────────────────────
+window.onmessage = (event: MessageEvent) => {
+  // ── Relay from iframe → code.ts ───────────────────────────────────────────
+  // Server pages post directly to window.parent (no pluginMessage wrapper).
+  if (event.data && !event.data.pluginMessage) {
+    const { type, ...rest } = event.data;
+    if (type) {
+      parent.postMessage({ pluginMessage: { type, ...rest } }, "*");
+    }
     return;
   }
 
+  const msg = event.data?.pluginMessage;
+  if (!msg) return;
+
   if (msg.type === "restoreState") {
     const s = msg.state;
-    if (s.serverUrl) serverUrl.value = s.serverUrl;
-
-    kvEnabled = s.kvEnabled ?? true;
-    kvBtn.classList.toggle("active", kvEnabled);
-    output.style.display = kvEnabled ? "" : "none";
-    if (!kvEnabled) {
-      copyBtn.style.display = "none";
-      output.textContent = "";
-      parent.postMessage({ pluginMessage: { type: "resize", width: window.innerWidth, height: 160 } }, "*");
+    if (s.serverUrl) serverUrlEl.value = s.serverUrl;
+    if (s.activeRoute) {
+      activeRoute = s.activeRoute;
+      tabBtns.forEach((btn) => btn.classList.toggle("tab-active", btn.dataset.route === activeRoute));
     }
-
-    liveMode = s.liveMode ?? false;
-    liveBtn.classList.toggle("active", liveMode);
-    liveBtn.textContent = liveMode ? "⦿ Live (on)" : "⦿ Live";
-    if (liveMode) {
-      parent.postMessage({ pluginMessage: { type: "setLive", enabled: true } }, "*");
-    }
-
-    connected = s.connected ?? false;
-    connectBtn.classList.toggle("active", connected);
-    connectBtn.textContent = connected ? "Connected" : "Connect";
-
-    status.textContent = "Resumed.";
+    if (s.connected) setConnected(true);
     return;
   }
 
   if (msg.type === "figmaNodes") {
-    if (connected) {
-      const base = serverUrl.value.trim();
-      // Always dump raw JSON to server (fire and forget)
-      fetch(base + "/json-dump", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: msg.data as string,
-      }).catch((e) => { status.textContent = "⚠ json-dump failed: " + e.message; });
-
-      if (kvEnabled) {
-        fetch(base + "/kv", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: msg.data as string,
-        }).then(async (res) => {
-          const kv = await res.text();
-          if (res.ok && kv) {
-            output.textContent = kv;
-            copyBtn.style.display = "inline-block";
-            status.textContent = liveMode ? "Live — server updated." : "Server done.";
-          } else {
-            status.textContent = "⚠ Server error: " + kv;
-          }
-        }).catch((e) => { status.textContent = "⚠ /kv failed: " + e.message; });
-      } else {
-        status.textContent = liveMode ? "Live — dumped." : "Dumped.";
-      }
-    } else {
-      status.textContent = liveMode ? "Live — updated." : "Done.";
-    }
+    if (!connected) return;
+    // Forward to the currently loaded page — it handles conversion itself.
+    mainFrame.contentWindow?.postMessage({ type: "figmaNodes", data: msg.data }, "*");
+    return;
   }
 };
+

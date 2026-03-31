@@ -6,56 +6,50 @@
   <title>Figma2Kv</title>
   <style>
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    html, body { height: 100%; margin: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
-      margin: 0; padding: 12px;
       background: #1e1e1e; color: #ccc;
       display: flex; flex-direction: column;
     }
-    h2 { font-size: 13px; margin: 0 0 8px; color: #fff; letter-spacing: 0.3px; }
-    #row { display: flex; gap: 8px; align-items: center; }
-    button {
-      background: #18a0fb; color: #fff; border: none;
-      padding: 6px 14px; border-radius: 4px;
-      cursor: pointer; font-size: 12px;
+    #urlBar {
+      display: flex; gap: 6px; align-items: center;
+      padding: 8px 10px; background: #252525;
+      border-bottom: 1px solid #333; flex-shrink: 0;
     }
-    button:hover { background: #0d8de3; }
-    #copyBtn { display: none; background: #3c3c3c; }
-    #copyBtn:hover { background: #555; }
-    #connectBtn, #bgBtn, #wsBtn { background: #3c3c3c; }
-    #connectBtn:hover, #bgBtn:hover, #wsBtn:hover { background: #555; }
-    #connectBtn.active { background: #1a7a3a; }
+    #serverUrl {
+      flex: 1; background: #2c2c2c; color: #fff;
+      border: 1px solid #444; border-radius: 4px;
+      padding: 5px 8px; font-size: 11px;
+    }
+    button {
+      background: #3c3c3c; color: #ccc; border: none;
+      padding: 5px 12px; border-radius: 4px;
+      cursor: pointer; font-size: 12px; white-space: nowrap;
+    }
+    button:hover { background: #505050; }
+    #connectBtn.active { background: #1a7a3a; color: #fff; }
     #connectBtn.active:hover { background: #1f9445; }
-    #wsBtn.active { background: #7a3a1a; }
-    #wsBtn.active:hover { background: #944520; }
-    #serverRow { display: flex; gap: 6px; align-items: center; padding: 0 8px 4px; }
-    #serverUrl { flex: 1; background: #2c2c2c; color: #fff; border: 1px solid #444;
-      border-radius: 4px; padding: 4px 8px; font-size: 11px; }
-    #liveBtn, #kvBtn { background: #3c3c3c; }
-    #liveBtn:hover, #kvBtn:hover { background: #555; }
-    #liveBtn.active, #kvBtn.active { background: #1a7a3a; }
-    #liveBtn.active:hover, #kvBtn.active:hover { background: #1f9445; }
-    #status { font-size: 11px; color: #888; }
-    #output {
-      margin-top: 10px;
-      background: #2d2d2d;
-      border-radius: 4px;
-      padding: 10px;
-      font-family: "SF Mono", "Fira Mono", monospace;
-      font-size: 11px;
-      line-height: 1.5;
-      white-space: pre;
-      overflow: auto;
-      flex: 1;
-      color: #9cdcfe;
-      min-height: 40px;
+    #tabBar {
+      display: flex; gap: 0;
+      border-bottom: 1px solid #333;
+      background: #1e1e1e; flex-shrink: 0;
+    }
+    .tab {
+      background: transparent; color: #888; border: none;
+      border-bottom: 2px solid transparent;
+      padding: 6px 14px; cursor: pointer;
+      font-size: 12px; border-radius: 0;
+    }
+    .tab:hover { color: #ccc; background: transparent; }
+    .tab.tab-active { color: #18a0fb; border-bottom-color: #18a0fb; }
+    #mainFrame {
+      flex: 1; border: none; width: 100%;
+      min-height: 0; background: #1e1e1e; display: block;
     }
     .resizeHandle {
-      position: fixed;
-      bottom: 0;
-      width: 24px; height: 24px;
-      z-index: 100;
+      position: fixed; bottom: 0;
+      width: 24px; height: 24px; z-index: 100;
     }
     #resizeHandleRight { right: 0; cursor: nwse-resize; }
     #resizeHandleLeft  { left: 0;  cursor: s-resize; }
@@ -90,21 +84,17 @@
   </style>
 </head>
 <body>
-  <h2>Figma → KV</h2>
-  <div id="row">
-    <button id="convertBtn">Convert selection</button>
-    <button id="liveBtn">⦿ Live</button>
-    <button id="kvBtn" class="active">KV</button>
-    <button id="copyBtn">Copy KV</button>
-  </div>
-  <div id="serverRow">
-    <input id="serverUrl" type="text" value="http://localhost:8765" />
+  <div id="urlBar">
+    <input id="serverUrl" type="text" value="http://localhost:8765" placeholder="Server URL" />
     <button id="connectBtn">Connect</button>
-    <button id="wsBtn">⇄ WS</button>
-    <button id="bgBtn">⬇ Background</button>
+    <button id="backgroundBtn">Background</button>
   </div>
-  <div id="status">Initialising…</div>
-  <div id="output"></div>
+  <div id="tabBar">
+    <button class="tab tab-active" data-route="/lab">Lab</button>
+    <button class="tab" data-route="/kv">KV</button>
+    <button class="tab" data-route="/canvas-py">Canvas</button>
+  </div>
+  <iframe id="mainFrame"></iframe>
   <div id="resizeHandleLeft" class="resizeHandle"></div>
   <div id="resizeHandleRight" class="resizeHandle"></div>
   <script type="module" src="./index.ts"></script>
