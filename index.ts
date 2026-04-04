@@ -46,9 +46,15 @@ function saveState() {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(route: string) {
+  const wasDevice  = activeRoute === "/device-preview";
+  const isDevice   = route === "/device-preview";
   activeRoute = route;
   tabBtns.forEach((btn) => btn.classList.toggle("tab-active", btn.dataset.route === route));
   if (connected) mainFrame.src = serverUrlEl.value.trim() + route;
+  // Notify sandbox when entering/leaving device mode so it can suppress resize messages
+  if (isDevice !== wasDevice) {
+    parent.postMessage({ pluginMessage: { type: "setDeviceMode", enabled: isDevice } }, "*");
+  }
   saveState();
 }
 
@@ -106,7 +112,7 @@ window.onmessage = (event: MessageEvent) => {
   if (msg.type === "figmaNodes") {
     if (!connected) return;
     // Forward to the currently loaded page — it handles conversion itself.
-    mainFrame.contentWindow?.postMessage({ type: "figmaNodes", data: msg.data }, "*");
+    mainFrame.contentWindow?.postMessage({ type: "figmaNodes", data: msg.data, images: msg.images ?? [] }, "*");
     return;
   }
 };
