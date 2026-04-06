@@ -131,5 +131,11 @@ window.onmessage = (event: MessageEvent) => {
     mainFrame.contentWindow?.postMessage({ type: "figmaNodes", data: msg.data, images: msg.images ?? [] }, "*");
     return;
   }
+
+  if (msg.type === "svgExports") {
+    // Relay exportAsync results from code.ts back to the server page so it can upload them.
+    mainFrame.contentWindow?.postMessage({ type: "svgExports", exports: msg.exports ?? [] }, "*");
+    return;
+  }
 };
 

@@ -37,7 +37,7 @@ const NODE_FIELDS = [
   // Fills / strokes
   "fills", "strokes",
   // HasGeometryTrait
-  "vectorPaths",
+  "vectorPaths", "vectorNetwork",
   "strokeWeight", "strokeAlign", "strokeCap", "strokeJoin",
   "strokeDashes", "strokeMiterAngle", "individualStrokeWeights",
   // CornerTrait
@@ -292,5 +292,25 @@ figma.ui.onmessage = (msg) => {
         figma.ui.postMessage({ type: "error", message: "figmaCmd: " + e });
       }
     }
+  }
+
+  if (msg.type === "exportSvgs") {
+    // Server asked us to export real SVG strings for VECTOR nodes via exportAsync.
+    // This runs AFTER the initial raw JSON send so it never blocks that fast path.
+    const nodeIds = (msg.nodeIds ?? []) as string[];
+    (async () => {
+      const exports: { id: string; svg: string }[] = [];
+      for (const id of nodeIds) {
+        const node = figma.getNodeById(id);
+        if (node && "exportAsync" in node) {
+          try {
+            const svg = await (node as ExportMixin).exportAsync({ format: "SVG_STRING" });
+            exports.push({ id, svg });
+          } catch (_) {}
+        }
+      }
+      figma.ui.postMessage({ type: "svgExports", exports });
+    })();
+    return;
   }
 };
