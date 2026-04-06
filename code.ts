@@ -93,7 +93,32 @@ function serialise(node: SceneNode): object {
     base.children = (node as ChildrenMixin).children.map(serialise);
   }
 
+  // Tag VECTOR nodes with their own id so the server can look up the uploaded SVG.
+  if (node.type === "VECTOR") {
+    base["svgId"] = node.id;
+  }
+
   return base;
+}
+
+// Recursively collect all unique VECTOR nodes from a node tree.
+async function collectSvgData(
+  node: SceneNode,
+  out: Map<string, string>
+): Promise<void> {
+  if (node.type === "VECTOR" && !out.has(node.id)) {
+    try {
+      const svgStr = await (node as VectorNode).exportAsync({ format: "SVG_STRING" });
+      out.set(node.id, svgStr);
+    } catch (_) {
+      // If export fails, skip — the server will 404 when the container tries to fetch.
+    }
+  }
+  if ("children" in node) {
+    for (const child of (node as ChildrenMixin).children) {
+      await collectSvgData(child as SceneNode, out);
+    }
+  }
 }
 
 // Recursively collect all unique IMAGE fill hashes from a node tree.
@@ -159,11 +184,17 @@ async function sendSelection(msgType = "figmaNodes") {
     }
   }
 
+  // Collect SVG data for VECTOR nodes.
+  const svgMap = new Map<string, string>();
+  for (const node of nodes) await collectSvgData(node, svgMap);
+  const svgs: { id: string; data: string }[] = Array.from(svgMap.entries()).map(([id, data]) => ({ id, data }));
+
   const serialised = nodes.map(serialise);
   figma.ui.postMessage({
     type: msgType,
     data: JSON.stringify(serialised),
     images,
+    svgs,
   });
 }
 
