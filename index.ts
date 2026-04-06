@@ -6,7 +6,24 @@ const mainFrame    = document.getElementById("mainFrame")     as HTMLIFrameEleme
 const tabBtns     = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"));
 
 let connected = false;
-let activeRoute = "/lab";
+let activeRoute = "/canvas-py";
+
+// ── Lock stream ───────────────────────────────────────────────────────────────
+// Subscribes to the server's lock-stream for the active tab so that locking
+// from an external browser (background mode) reaches the Figma plugin.
+let lockStreamSource: EventSource | null = null;
+
+function subscribeLockStream(baseUrl: string, route: string) {
+  if (lockStreamSource) { lockStreamSource.close(); lockStreamSource = null; }
+  const segment = route.split("/").filter(Boolean)[0]; // "canvas-py" or "widget-py"
+  if (!segment) return;
+  lockStreamSource = new EventSource(`${baseUrl}/${segment}/lock-stream`);
+  lockStreamSource.onmessage = (e) => {
+    const enabled = JSON.parse(e.data) as boolean;
+    // Relay to code.ts so the Figma selection lock state stays in sync.
+    parent.postMessage({ pluginMessage: { type: "setLock", enabled } }, "*");
+  };
+}
 
 parent.postMessage({ pluginMessage: { type: "uiReady" } }, "*");
 
@@ -46,14 +63,11 @@ function saveState() {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(route: string) {
-  const wasDevice  = activeRoute === "/device-preview";
-  const isDevice   = route === "/device-preview";
   activeRoute = route;
   tabBtns.forEach((btn) => btn.classList.toggle("tab-active", btn.dataset.route === route));
-  if (connected) mainFrame.src = serverUrlEl.value.trim() + route;
-  // Notify sandbox when entering/leaving device mode so it can suppress resize messages
-  if (isDevice !== wasDevice) {
-    parent.postMessage({ pluginMessage: { type: "setDeviceMode", enabled: isDevice } }, "*");
+  if (connected) {
+    mainFrame.src = serverUrlEl.value.trim() + route;
+    subscribeLockStream(serverUrlEl.value.trim(), route);
   }
   saveState();
 }
@@ -69,9 +83,11 @@ function setConnected(value: boolean) {
   connectBtn.textContent = connected ? "Connected" : "Connect";
   if (connected) {
     mainFrame.src = serverUrlEl.value.trim() + activeRoute;
+    subscribeLockStream(serverUrlEl.value.trim(), activeRoute);
     parent.postMessage({ pluginMessage: { type: "setLive", enabled: true } }, "*");
   } else {
     mainFrame.src = "";
+    if (lockStreamSource) { lockStreamSource.close(); lockStreamSource = null; }
     parent.postMessage({ pluginMessage: { type: "setLive", enabled: false } }, "*");
   }
   saveState();
